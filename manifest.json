@@ -1,7 +1,7 @@
 {
 	"manifest_version": 3,
 	"name": "Groq Prompt Optimizer",
-	"version": "1.0.4",
+	"version": "1.0.5",
 	"description": "Highlight text, right-click, and optimize your prompt using Groq.",
 	"permissions": ["contextMenus", "storage", "activeTab", "scripting", "tabs"],
 	"host_permissions": ["https://api.groq.com/*"],
@@ -29,6 +29,13 @@
 				"mac": "Command+Shift+O"
 			},
 			"description": "Optimize the currently selected text with Groq"
+		},
+		"add-to-context": {
+			"suggested_key": {
+				"default": "Alt+Shift+C",
+				"mac": "Command+Shift+C"
+			},
+			"description": "Add the currently selected text to the Optimizer Context"
 		}
 	},
 	"icons": {

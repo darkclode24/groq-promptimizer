@@ -83,7 +83,14 @@ const GENERIC_SELECTORS = [
  * @param {string} hostname - The current page's hostname
  * @returns {string|null} The extracted response text, or null if not found
  */
-function _extractLastResponse(hostname) {
+/**
+ * Attempts to extract the last AI response text from the current page.
+ * Tries known selectors for the hostname first, then falls back through tiers.
+ *
+ * @param {string} hostname - The current page's hostname
+ * @returns {string|null} The extracted response text, or null if not found
+ */
+function extractLastResponse(hostname) {
 	// Tier 1: Known site-specific selectors
 	const siteSelectors = SITE_EXTRACTORS[hostname];
 	if (siteSelectors) {

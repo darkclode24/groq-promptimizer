@@ -15,6 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	const memoryStats = document.getElementById("memoryStats");
 	const clearSiteBtn = document.getElementById("clearSiteBtn");
 	const clearAllBtn = document.getElementById("clearAllBtn");
+	const optimizeSelectionBtn = document.getElementById("optimizeSelectionBtn");
 
 	/** @type {string|null} The active tab's hostname */
 	let currentHostname = null;
@@ -67,22 +68,41 @@ document.addEventListener("DOMContentLoaded", () => {
 
 	clearSiteBtn.addEventListener("click", () => {
 		if (!currentHostname) return;
-		chrome.storage.local.get(["optHistory"], (result) => {
-			const history = result.optHistory || {};
+		chrome.storage.local.get(["curatedContext"], (result) => {
+			const history = result.curatedContext || {};
 			delete history[currentHostname];
-			chrome.storage.local.set({ optHistory: history }, () => {
-				showStatus("Site memory cleared!", "#10b981");
+			chrome.storage.local.set({ curatedContext: history }, () => {
+				showStatus("Site context cleared!", "#10b981");
 				loadSiteMemory();
 			});
 		});
 	});
 
 	clearAllBtn.addEventListener("click", () => {
-		chrome.storage.local.set({ optHistory: {} }, () => {
-			showStatus("All memory cleared!", "#10b981");
+		chrome.storage.local.set({ curatedContext: {} }, () => {
+			showStatus("All contexts cleared!", "#10b981");
 			loadSiteMemory();
 		});
 	});
+
+	if (optimizeSelectionBtn) {
+		optimizeSelectionBtn.addEventListener("click", () => {
+			chrome.runtime.sendMessage(
+				{ action: "optimizeCurrentSelection" },
+				(response) => {
+					if (chrome.runtime.lastError) {
+						showStatus("Error: Extension context invalidated.", "#ef4444");
+						return;
+					}
+					if (response?.error) {
+						showStatus(response.error, "#ef4444");
+					} else {
+						window.close(); // Close popup on success
+					}
+				},
+			);
+		});
+	}
 
 	// ─── Memory Viewer ──────────────────────────────────────────────────────────
 
@@ -108,8 +128,8 @@ document.addEventListener("DOMContentLoaded", () => {
 			currentHostname = null;
 		}
 
-		chrome.storage.local.get(["optHistory"], (result) => {
-			const history = result.optHistory || {};
+		chrome.storage.local.get(["curatedContext"], (result) => {
+			const history = result.curatedContext || {};
 			renderMemory(history);
 		});
 	}
@@ -127,11 +147,12 @@ document.addEventListener("DOMContentLoaded", () => {
 		}, 0);
 
 		// Global stats
-		const totalSize = new Blob([JSON.stringify({ optHistory: history })]).size;
+		const totalSize = new Blob([JSON.stringify({ curatedContext: history })])
+			.size;
 		if (allHostnames.length > 0) {
-			memoryStats.textContent = `${allHostnames.length} site${allHostnames.length !== 1 ? "s" : ""} · ${totalEntries} entr${totalEntries !== 1 ? "ies" : "y"} · ${formatBytes(totalSize)}`;
+			memoryStats.textContent = `${allHostnames.length} site${allHostnames.length !== 1 ? "s" : ""} · ${totalEntries} snippet${totalEntries !== 1 ? "s" : ""} · ${formatBytes(totalSize)}`;
 		} else {
-			memoryStats.textContent = "No memory stored";
+			memoryStats.textContent = "No context stored";
 		}
 
 		// Update clear all button state
@@ -142,9 +163,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
 		// No active hostname
 		if (!currentHostname) {
-			memoryHostname.textContent = "Open a webpage to view its memory";
+			memoryHostname.textContent = "Open a webpage to view its context";
 			memoryBadge.classList.add("hidden");
 			clearSiteBtn.classList.add("hidden");
+			if (optimizeSelectionBtn) optimizeSelectionBtn.classList.add("hidden");
 			memoryContent.innerHTML = "";
 			return;
 		}
@@ -153,26 +175,26 @@ document.addEventListener("DOMContentLoaded", () => {
 		memoryHostname.textContent = currentHostname;
 
 		// Get entries for this site
-		const siteData = history[currentHostname];
-		const entries =
-			siteData?.entries || (Array.isArray(siteData) ? siteData : []);
+		const entries = history[currentHostname] || [];
 
 		if (entries.length === 0) {
 			memoryBadge.classList.add("hidden");
 			clearSiteBtn.classList.add("hidden");
+			if (optimizeSelectionBtn) optimizeSelectionBtn.classList.add("hidden");
 			memoryContent.innerHTML = `
         <div class="memory-empty">
-          No memory for this site.<br>
-          Optimize a prompt to start building context.
+          No curated context for this site.<br>
+          Highlight text and right-click "Add to Optimizer Context" to start.
         </div>
       `;
 			return;
 		}
 
 		// Show badge and clear button
-		memoryBadge.textContent = `${entries.length} entr${entries.length !== 1 ? "ies" : "y"}`;
+		memoryBadge.textContent = `${entries.length} snippet${entries.length !== 1 ? "s" : ""}`;
 		memoryBadge.classList.remove("hidden");
 		clearSiteBtn.classList.remove("hidden");
+		if (optimizeSelectionBtn) optimizeSelectionBtn.classList.remove("hidden");
 
 		// Render entries (newest first for display)
 		const reversedEntries = [...entries].reverse();
@@ -180,28 +202,14 @@ document.addEventListener("DOMContentLoaded", () => {
 			.map((entry, displayIndex) => {
 				const realIndex = entries.length - 1 - displayIndex;
 				const timeStr = entry.ts ? formatRelativeTime(entry.ts) : "unknown";
-				// Primary: optimizer output (a). Fallback to q for legacy entries.
-				const promptPreview = truncate(entry.a || entry.q || "(empty)", 100);
-				const hasResponse = !!entry.r;
-				const responsePreview = hasResponse ? truncate(entry.r, 150) : "";
+				const snippetPreview = truncate(entry.text || "(empty)", 250);
 
 				return `
-        <div class="memory-entry${hasResponse ? "" : " no-expand"}" data-index="${realIndex}">
-          <div class="memory-entry-label">Optimized Prompt</div>
-          <div class="memory-entry-text">${escapeHtml(promptPreview)}</div>
-          ${
-						hasResponse
-							? `
-          <div class="memory-entry-output">
-            <div class="memory-entry-label output">Site AI Response</div>
-            <div class="memory-entry-text output">${escapeHtml(responsePreview)}</div>
-          </div>
-          `
-							: ""
-					}
+        <div class="memory-entry no-expand" data-index="${realIndex}">
+          <div class="memory-entry-label">Snippet</div>
+          <div class="memory-entry-text">${escapeHtml(snippetPreview)}</div>
           <div class="memory-entry-meta">
             <span class="memory-entry-time">${timeStr}</span>
-            ${hasResponse ? '<span class="memory-expand-hint"><span class="hint-text">tap to expand</span></span>' : ""}
           </div>
           <button class="memory-delete-btn" data-index="${realIndex}" title="Delete entry">🗑</button>
         </div>
@@ -235,12 +243,10 @@ document.addEventListener("DOMContentLoaded", () => {
 	 * @param {number} index - Index into the entries array
 	 */
 	function deleteEntry(hostname, index) {
-		chrome.storage.local.get(["optHistory"], (result) => {
-			const history = result.optHistory || {};
-			const siteData = history[hostname];
-			if (!siteData) return;
+		chrome.storage.local.get(["curatedContext"], (result) => {
+			const history = result.curatedContext || {};
+			const entries = history[hostname] || [];
 
-			const entries = siteData.entries || [];
 			if (index < 0 || index >= entries.length) return;
 
 			entries.splice(index, 1);
@@ -248,10 +254,10 @@ document.addEventListener("DOMContentLoaded", () => {
 			if (entries.length === 0) {
 				delete history[hostname];
 			} else {
-				siteData.entries = entries;
+				history[hostname] = entries;
 			}
 
-			chrome.storage.local.set({ optHistory: history }, () => {
+			chrome.storage.local.set({ curatedContext: history }, () => {
 				loadSiteMemory();
 			});
 		});

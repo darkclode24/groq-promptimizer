@@ -152,6 +152,14 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 		showToast(request.error, "error");
 	}
 
+	if (request.action === "toast") {
+		showToast(
+			request.message,
+			request.type || "success",
+			request.duration || 2000,
+		);
+	}
+
 	if (request.action === "replaceText") {
 		const activeElement = document.activeElement;
 

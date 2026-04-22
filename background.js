@@ -76,6 +76,11 @@ chrome.runtime.onInstalled.addListener(() => {
 		title: "Optimize with Groq",
 		contexts: ["selection"],
 	});
+	chrome.contextMenus.create({
+		id: "add-to-context",
+		title: "Add to Optimizer Context",
+		contexts: ["selection"],
+	});
 });
 
 // ─── Restricted Page Check ──────────────────────────────────────────────────────
@@ -106,23 +111,96 @@ function isRestrictedPage(url) {
 // ─── Event Listeners ────────────────────────────────────────────────────────────
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+	if (isRestrictedPage(tab?.url)) {
+		console.warn("Cannot perform actions on restricted browser pages.");
+		return;
+	}
 	if (info.menuItemId === "optimize-prompt") {
-		if (isRestrictedPage(tab.url)) {
-			console.warn("Cannot optimize on restricted browser pages.");
-			return;
-		}
 		handleOptimization(info.selectionText, tab);
+	} else if (info.menuItemId === "add-to-context") {
+		addToCuratedContext(info.selectionText, tab);
+	}
+});
+
+async function addToCuratedContext(text, tab) {
+	try {
+		const hostname = new URL(tab.url).hostname;
+		const result = await chrome.storage.local.get(["curatedContext"]);
+		const contextMap = result.curatedContext || {};
+		const siteContext = contextMap[hostname] || [];
+
+		siteContext.push({
+			id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+			text: text.trim(),
+			ts: Date.now(),
+		});
+
+		contextMap[hostname] = siteContext;
+		await chrome.storage.local.set({ curatedContext: contextMap });
+
+		sendMessageToTab(tab.id, {
+			action: "toast",
+			message: "Added to Optimizer Context",
+			type: "success",
+			duration: 2500,
+		});
+	} catch (err) {
+		console.error("Failed to add context:", err);
+		sendMessageToTab(tab.id, {
+			action: "toast",
+			message: "Failed to add context",
+			type: "error",
+			duration: 2500,
+		});
+	}
+}
+
+// Handle messages from the popup (e.g. Optimize Current Selection)
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+	if (request.action === "optimizeCurrentSelection") {
+		(async () => {
+			try {
+				const [tab] = await chrome.tabs.query({
+					active: true,
+					currentWindow: true,
+				});
+				if (!tab || isRestrictedPage(tab.url)) {
+					sendResponse({ error: "Cannot optimize on restricted pages." });
+					return;
+				}
+
+				const [{ result: selectedText }] = await chrome.scripting.executeScript(
+					{
+						target: { tabId: tab.id },
+						func: () => window.getSelection().toString(),
+					},
+				);
+
+				if (!selectedText || selectedText.trim().length === 0) {
+					sendResponse({
+						error: "No text selected. Highlight a prompt first.",
+					});
+					return;
+				}
+
+				handleOptimization(selectedText, tab);
+				sendResponse({ success: true });
+			} catch (err) {
+				sendResponse({ error: "Could not capture selection." });
+			}
+		})();
+		return true; // Keep message channel open for async response
 	}
 });
 
 chrome.commands.onCommand.addListener(async (command) => {
-	if (command !== "optimize-selection") return;
+	if (command !== "optimize-selection" && command !== "add-to-context") return;
 
 	const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 	if (!tab) return;
 
 	if (isRestrictedPage(tab.url)) {
-		console.warn("Cannot optimize on restricted browser pages.");
+		console.warn("Cannot perform actions on restricted browser pages.");
 		return;
 	}
 
@@ -134,12 +212,16 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 		if (!selectedText || selectedText.trim().length === 0) {
 			sendMessageToTab(tab.id, {
-				error: "No text selected. Highlight a prompt first.",
+				error: `No text selected. Highlight a ${command === "add-to-context" ? "snippet" : "prompt"} first.`,
 			});
 			return;
 		}
 
-		handleOptimization(selectedText, tab);
+		if (command === "optimize-selection") {
+			handleOptimization(selectedText, tab);
+		} else {
+			addToCuratedContext(selectedText, tab);
+		}
 	} catch (err) {
 		console.error("Selection capture failed:", err);
 		sendMessageToTab(tab.id, {
@@ -175,10 +257,12 @@ async function handleOptimization(rawText, tab) {
 			"groqApiKey",
 			"selectedModel",
 			"optHistory",
+			"curatedContext",
 		]);
 		const apiKey = result.groqApiKey;
 		const model = result.selectedModel || CONFIG.DEFAULT_MODEL;
 		let history = result.optHistory || {};
+		const curatedContextMap = result.curatedContext || {};
 
 		if (!apiKey) {
 			sendMessageToTab(tab.id, {
@@ -204,6 +288,8 @@ async function handleOptimization(rawText, tab) {
 		history = pruneHistory(history);
 		const siteHistory = history[hostname]?.entries || [];
 
+		const siteCuratedContext = curatedContextMap[hostname] || [];
+
 		sendMessageToTab(tab.id, { status: "loading", model: model });
 
 		const optimizedText = await callGroqAPI(
@@ -211,6 +297,7 @@ async function handleOptimization(rawText, tab) {
 			apiKey,
 			model,
 			siteHistory,
+			siteCuratedContext,
 		);
 
 		// Update history: store optimizer output (a) and site AI response (r) — no raw user input
@@ -251,17 +338,37 @@ async function handleOptimization(rawText, tab) {
  * @param {string} apiKey - Groq API key
  * @param {string} model - Model identifier
  * @param {Array<{a: string, r: string|null, ts: number}>} history - Site conversation history
+ * @param {Array<{id: string, text: string, ts: number}>} curatedContext - User manually selected snippets
  * @returns {Promise<string>} Optimized prompt text
  */
-async function callGroqAPI(prompt, apiKey, model, history = []) {
+async function callGroqAPI(
+	prompt,
+	apiKey,
+	model,
+	history = [],
+	curatedContext = [],
+) {
 	// Build system instruction with model-specific addendum
 	const systemContent = CORE_SYSTEM_INSTRUCTION + getModelAddendum(model);
 
 	// Build messages array: system → context → current prompt
 	const messages = [{ role: "system", content: systemContent }];
 
-	// Build conversation context from optimizer outputs + site AI responses
-	if (history.length > 0) {
+	// Use curated context if available, otherwise fallback to automatic history
+	if (curatedContext.length > 0) {
+		const curatedBlock = curatedContext
+			.map((c, i) => `--- Snippet ${i + 1} ---\n${c.text}`)
+			.join("\n\n");
+		messages.push({
+			role: "user",
+			content: `[Curated Context selected by user — use this explicit context to optimize the prompt]:\n${curatedBlock}`,
+		});
+		messages.push({
+			role: "assistant",
+			content:
+				"Understood. I will strictly use the curated snippets provided as context for the prompt optimization.",
+		});
+	} else if (history.length > 0) {
 		const contextBlock = history
 			.map((turn, i) => {
 				let block = `--- Turn ${i + 1} ---\nOptimized prompt sent: ${turn.a}`;
