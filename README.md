@@ -1,10 +1,10 @@
-# Groq API Key Meta Prompting Tool
+# Groq Promptimizer
 
-*Generate and manage meta prompts using the Groq API from your terminal.*
+*Generate meta prompts using the Groq API.*
 
 ## Description
 
-The **Groq API Key Meta Prompting Tool** is a lightweight extension for meta-prompting powered by the Groq API.
+The **Groq Promptimizer** is a lightweight extension for meta-prompting powered by the Groq API.
 
 ## Prerequisites
 * `pip` or `poetry`
