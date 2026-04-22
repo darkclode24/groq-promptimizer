@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Groq Optimizer Settings</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: rgba(30, 41, 59, 0.7);
+      --input-bg: #1e293b;
+      --text: #f8fafc;
+      --accent: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
+      --border: rgba(255, 255, 255, 0.1);
+      --danger: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.1);
+      --danger-border: rgba(239, 68, 68, 0.2);
+      --success: #10b981;
+    }
+
+    body {
+      width: 340px;
+      margin: 0;
+      padding: 20px;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+
+    .header h2 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 700;
+      background: var(--accent);
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    label {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: #94a3b8;
+    }
+
+    input[type="password"], select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: white;
+      font-size: 0.9rem;
+      box-sizing: border-box;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input:focus, select:focus {
+      outline: none;
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+
+    button:hover {
+      opacity: 0.9;
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    #status {
+      height: 20px;
+      font-size: 0.8rem;
+      text-align: center;
+      color: var(--success);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.3s;
+    }
+
+    .footer {
+      font-size: 0.75rem;
+      text-align: center;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    #key-section {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+      margin-bottom: 8px;
+    }
+
+    .info-box {
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #editKeyBtn {
+      background: none;
+      border: 1px solid #38bdf8;
+      color: #38bdf8;
+      width: auto;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      margin: 0;
+    }
+    
+    #editKeyBtn:hover {
+      background: rgba(56, 189, 248, 0.1);
+    }
+
+    /* ── Memory Viewer ──────────────────────────────── */
+
+    .memory-section {
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+    }
+
+    .memory-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .memory-header h3 {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .memory-hostname {
+      font-size: 0.75rem;
+      color: #64748b;
+      font-weight: 400;
+      margin-bottom: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .memory-empty {
+      text-align: center;
+      padding: 16px 12px;
+      color: #64748b;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      background: var(--input-bg);
+      border-radius: 8px;
+      border: 1px dashed var(--border);
+    }
+
+    .memory-entry {
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      position: relative;
+      transition: border-color 0.2s;
+    }
+
+    .memory-entry:hover {
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .memory-entry-label {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 3px;
+      color: #64748b;
+    }
+
+    .memory-entry-label.output {
+      color: #38bdf8;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    .memory-entry-text {
+      font-size: 0.8rem;
+      color: #cbd5e1;
+      line-height: 1.4;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      line-clamp: 2;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      padding-right: 24px;
+    }
+
+    .memory-entry-text.output {
+      color: #94a3b8;
+      font-style: italic;
+    }
+
+    .memory-entry-output {
+      display: none;
+    }
+
+    .memory-entry.expanded .memory-entry-output {
+      display: block;
+    }
+
+    .memory-expand-hint {
+      font-size: 0.65rem;
+      color: #475569;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .memory-entry.expanded .memory-expand-hint .hint-text {
+      display: none;
+    }
+
+    .memory-entry-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 6px;
+    }
+
+    .memory-entry-time {
+      font-size: 0.7rem;
+      color: #64748b;
+    }
+
+    .memory-delete-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: none;
+      border: none;
+      color: #64748b;
+      cursor: pointer;
+      padding: 2px 4px;
+      font-size: 0.85rem;
+      width: auto;
+      opacity: 0;
+      transition: opacity 0.2s, color 0.2s;
+    }
+
+    .memory-entry:hover .memory-delete-btn {
+      opacity: 1;
+    }
+
+    .memory-delete-btn:hover {
+      color: var(--danger);
+    }
+
+    .memory-actions {
+      margin-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .btn-outline-danger {
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+      color: var(--danger);
+      padding: 8px 12px;
+      font-size: 0.8rem;
+    }
+
+    .btn-outline-danger:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .memory-stats {
+      text-align: center;
+      font-size: 0.7rem;
+      color: #475569;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2>Prompt Optimizer</h2>
+  </div>
+
+  <div id="key-section">
+    <!-- View Mode -->
+    <div id="key-view" class="info-box hidden">
+      <span>API Key is set ✓</span>
+      <button id="editKeyBtn" type="button">Edit</button>
+    </div>
+
+    <!-- Edit Mode -->
+    <div id="key-edit" class="section">
+      <label for="apiKey">Groq API Key</label>
+      <input type="password" id="apiKey" placeholder="gsk_...">
+    </div>
+  </div>
+
+  <div class="section">
+    <label for="modelSelect">Select Model</label>
+    <select id="modelSelect">
+      <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+      <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout 17B</option>
+      <option value="openai/gpt-oss-120b">GPT OSS 120B</option>
+      <option value="qwen/qwen3-32b">Qwen 3 32B (Reasoning)</option>
+    </select>
+  </div>
+
+  <button id="saveBtn" type="button">Save Preferences</button>
+  
+  <div id="status"></div>
+
+  <!-- ── Site Memory Viewer ──────────────────────── -->
+  <div class="memory-section">
+    <div class="memory-header">
+      <h3>📋 Site Memory</h3>
+      <span id="memoryBadge" class="badge hidden"></span>
+    </div>
+    <div id="memoryHostname" class="memory-hostname"></div>
+    
+    <div id="memoryContent">
+      <!-- Dynamically rendered by popup.js -->
+    </div>
+
+    <div class="memory-actions">
+      <button id="clearSiteBtn" class="btn-outline-danger hidden" type="button">Clear Site Memory</button>
+      <button id="clearAllBtn" class="btn-outline-danger" type="button">Clear All Memory</button>
+    </div>
+
+    <div id="memoryStats" class="memory-stats"></div>
+  </div>
+
+  <div class="footer">
+    Settings are stored locally in your browser.
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

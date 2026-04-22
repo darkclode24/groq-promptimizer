@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Test Alert</title>
+</head>
+<body>
+  <p>Test page</p>
+  <script>
+    // Mock chrome runtime
+    window.chrome = {
+      runtime: {
+        id: 'test',
+        connect: () => ({ onDisconnect: { addListener: () => {} } }),
+        onMessage: { addListener: () => {} }
+      }
+    };
+  </script>
+  <script src="content.js"></script>
+  <script>
+    setTimeout(() => {
+      showLoading("gemini");
+    }, 500);
+  </script>
+</body>
+</html>
