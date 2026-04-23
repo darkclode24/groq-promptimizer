@@ -22,7 +22,7 @@ function renderAlertDOM() {
 	modal.id = "groq-alert-modal";
 	modal.innerHTML = `
     <div class="groq-alert-header">
-      <span class="groq-alert-icon" id="groq-alert-icon">⚡</span>
+      <div class="groq-alert-icon" id="groq-alert-icon">⚡</div>
       <span id="groq-alert-title">Prompt Optimizer</span>
     </div>
     <div class="groq-alert-body" id="groq-alert-message"></div>
@@ -36,6 +36,17 @@ function renderAlertDOM() {
 	document
 		.getElementById("groq-alert-btn")
 		.addEventListener("click", hideLoading);
+}
+
+function renderToastDOM() {
+	if (document.getElementById("groq-toast")) return;
+	const toast = document.createElement("div");
+	toast.id = "groq-toast";
+	toast.innerHTML = `
+    <div class="groq-alert-icon" id="groq-toast-icon">✓</div>
+    <div class="groq-alert-body" id="groq-toast-message"></div>
+  `;
+	document.body.appendChild(toast);
 }
 
 function updateAlert(opts) {
@@ -62,33 +73,24 @@ function updateAlert(opts) {
 		btn.classList.add("groq-hidden");
 
 		progBar.style.width = "0%";
-		progBar.style.background = "linear-gradient(90deg, #38bdf8, #818cf8)";
 
 		let progress = 0;
 		currentProgressInterval = setInterval(() => {
-			progress += (90 - progress) * 0.15; // Smoothly ease to 90%
+			progress += (90 - progress) * 0.1; // Smoothly ease to 90%
 			progBar.style.width = `${progress}%`;
 		}, 100);
-	} else if (opts.type === "success") {
-		icon.textContent = "✓";
-		title.style.color = "#34d399";
-		progContainer.classList.remove("groq-hidden");
-		btn.classList.add("groq-hidden");
 
-		progBar.style.width = "100%";
-		progBar.style.background = "#34d399";
-
-		// Auto collapse after success
-		groqAlertTimeout = setTimeout(hideLoading, 2000);
+		modal.classList.add("groq-show");
+		overlay.classList.add("groq-show");
 	} else if (opts.type === "error") {
+		// For errors in modal context (e.g. timeout during optimization)
 		icon.textContent = "❌";
 		title.style.color = "#f87171";
 		progContainer.classList.add("groq-hidden");
 		btn.classList.remove("groq-hidden");
+		modal.classList.add("groq-show");
+		overlay.classList.add("groq-show");
 	}
-
-	modal.classList.add("groq-show");
-	overlay.classList.add("groq-show");
 }
 
 function hideLoading() {
@@ -96,18 +98,44 @@ function hideLoading() {
 	const overlay = document.getElementById("groq-alert-overlay");
 	if (modal) {
 		modal.classList.remove("groq-show");
-		setTimeout(() => {
-			if (modal.parentNode) modal.remove();
-		}, 300);
+		setTimeout(() => modal.remove(), 400);
 	}
 	if (overlay) {
 		overlay.classList.remove("groq-show");
-		setTimeout(() => {
-			if (overlay.parentNode) overlay.remove();
-		}, 300);
+		setTimeout(() => overlay.remove(), 400);
 	}
 	clearTimeout(groqAlertTimeout);
 	clearInterval(currentProgressInterval);
+}
+
+function showToast(message, type = "success", duration = 3000) {
+	renderToastDOM();
+	const toast = document.getElementById("groq-toast");
+	const icon = document.getElementById("groq-toast-icon");
+	const msg = document.getElementById("groq-toast-message");
+
+	msg.textContent = message;
+	if (type === "success") {
+		icon.textContent = "✓";
+		icon.style.color = "#10b981";
+	} else if (type === "error") {
+		icon.textContent = "❌";
+		icon.style.color = "#f87171";
+	} else {
+		icon.textContent = "⚡";
+		icon.style.color = "#818cf8";
+	}
+
+	// Snappy show
+	requestAnimationFrame(() => {
+		toast.classList.add("groq-show");
+	});
+
+	clearTimeout(groqAlertTimeout);
+	groqAlertTimeout = setTimeout(() => {
+		toast.classList.remove("groq-show");
+		setTimeout(() => toast.remove(), 400);
+	}, duration);
 }
 
 function showLoading(modelName) {
@@ -117,23 +145,14 @@ function showLoading(modelName) {
 	const prettyName = displayName.charAt(0).toUpperCase() + displayName.slice(1);
 	updateAlert({
 		type: "loading",
-		title: "Optimizing Prompt...",
-		message: `Using ${prettyName}`,
-	});
-}
-
-function showToast(message, type = "error", _duration = 2000) {
-	updateAlert({
-		type: type,
-		title: type === "error" ? "Optimization Failed" : "Success!",
-		message: message,
+		title: "Optimizing...",
+		message: `Drafting with ${prettyName}`,
 	});
 }
 
 // ─── Message Handler ────────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-	// ── Capture AI Response from page ───────────────────────────────
 	if (request.action === "captureResponse") {
 		const hostname = window.location.hostname;
 		const response =
@@ -141,7 +160,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 				? extractLastResponse(hostname)
 				: null;
 		sendResponse({ response: response });
-		return; // synchronous response
+		return;
 	}
 
 	if (request.status === "loading") {
@@ -149,27 +168,26 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 	}
 
 	if (request.error) {
-		showToast(request.error, "error");
+		hideLoading();
+		showToast(request.error, "error", 4000);
 	}
 
 	if (request.action === "toast") {
 		showToast(
 			request.message,
 			request.type || "success",
-			request.duration || 2000,
+			request.duration || 3000,
 		);
 	}
 
 	if (request.action === "replaceText") {
+		hideLoading();
 		const activeElement = document.activeElement;
-
-		// Build success message with memory context info
 		const memoryInfo = request.entryCount
-			? ` (${request.entryCount} in memory)`
+			? ` (+${request.entryCount} context)`
 			: "";
 
 		let replaced = false;
-
 		if (
 			activeElement &&
 			(activeElement.tagName === "TEXTAREA" ||
@@ -178,7 +196,6 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 			const start = activeElement.selectionStart;
 			const end = activeElement.selectionEnd;
 			const text = activeElement.value;
-
 			activeElement.value =
 				text.slice(0, start) + request.text + text.slice(end);
 			activeElement.dispatchEvent(new Event("input", { bubbles: true }));
@@ -189,26 +206,22 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 		}
 
 		if (replaced) {
-			showToast(`Prompt optimized${memoryInfo}`, "success", 2500);
+			showToast(`Prompt Refined${memoryInfo}`, "success");
 		} else {
 			navigator.clipboard.writeText(request.text).then(() => {
-				showToast(
-					`Copied to clipboard${memoryInfo}. (Could not auto-insert)`,
-					"success",
-					4000,
-				);
+				showToast(`Copied to clipboard${memoryInfo}`, "success");
 			});
 		}
 	}
 });
 
-// ─── Cleanup on Context Invalidation ────────────────────────────────────────────
+// ─── Cleanup ────────────────────────────────────────────────────────────────────
 
 if (chrome.runtime?.id) {
 	const port = chrome.runtime.connect();
 	port.onDisconnect.addListener(() => {
 		hideLoading();
-		const styleEl = document.getElementById("groq-optimizer-styles");
-		if (styleEl) styleEl.remove();
+		const toast = document.getElementById("groq-toast");
+		if (toast) toast.remove();
 	});
 }
