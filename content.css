@@ -127,6 +127,21 @@
 	line-height: 1.4;
 }
 
+/* ─── Stream Box ─────────────────────────────────────────────────────────── */
+.groq-stream-content {
+	max-height: 120px;
+	overflow-y: auto;
+	font-size: 0.85rem;
+	color: #94a3b8;
+	background: rgba(0, 0, 0, 0.2);
+	padding: 8px 12px;
+	border-radius: 8px;
+	border: 1px solid rgba(255, 255, 255, 0.05);
+	margin-bottom: 8px;
+	white-space: pre-wrap;
+	font-family: monospace;
+}
+
 /* ─── Progress Bar ───────────────────────────────────────────────────────── */
 .groq-progress-container {
 	width: 100%;

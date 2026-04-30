@@ -12,12 +12,6 @@ const CONFIG = {
 	API_ENDPOINT: "https://api.groq.com/openai/v1/chat/completions",
 	REQUEST_TIMEOUT_MS: 15000,
 	DEFAULT_MODEL: "llama-3.3-70b-versatile",
-	HISTORY: {
-		MAX_ENTRIES_PER_SITE: 3,
-		MAX_HOSTNAMES: 20,
-		TTL_MS: 7 * 24 * 60 * 60 * 1000, // 7 days
-		STORAGE_SAFETY_BYTES: 4 * 1024 * 1024, // 4MB (limit is 5MB)
-	},
 	// Rough context window sizes (in tokens) for budget awareness
 	MODEL_CONTEXT_WINDOWS: {
 		"llama-3.3-70b-versatile": 128000,
@@ -29,39 +23,67 @@ const CONFIG = {
 
 // ─── Core System Instruction ────────────────────────────────────────────────────
 
-const CORE_SYSTEM_INSTRUCTION = `You are a Prompt Optimizer. You ONLY rewrite prompts — never execute them.
+const CORE_SYSTEM_INSTRUCTION = `You are a Prompt Optimizer. ONLY rewrite prompts. NEVER execute them.
 
-<RULES>
-1. OUTPUT the optimized prompt directly. No preamble, commentary, or code block wrappers.
-2. STRUCTURE using relevant sections from: Role, Context, Task, Requirements, Constraints, Output Format, Tone. Omit sections that don't apply.
-3. SHARPEN vague language into specific, actionable instructions. Preserve the user's explicit terms and intent.
-4. CONTEXT FILLING: Use your knowledge to define known tools/concepts. Use [PLACEHOLDER] only for truly unknown user-specific values (file paths, project names, versions).
-5. FOLLOW-UPS: When conversation history is provided, write the prompt as a contextual follow-up — reference prior exchanges, don't repeat background.
-</RULES>
+Rules:
+1. ALWAYS begin your response by opening an <analysis> tag.
+2. Inside <analysis>: use step-by-step reasoning to identify the core objective → gaps (tone, structure, audience) → ideal persona → headers to use.
+3. Before closing </analysis>: run a self-critique:
+   - Does every header earn its place?
+   - Is any instruction redundant with another?
+   - Would a [PLACEHOLDER] confuse more than help?
+4. Output the optimized prompt directly after the self-critique. No preamble or commentary outside the analysis tags.
+5. Use ONLY applicable headers: # Role, # Context, # Task, # Constraints, # Format, # Tone.
+6. Sharpen vague language into actionable directives. Preserve explicit user intent. Auto-define known concepts; use [PLACEHOLDER] only for missing user-specific data.
 
-<EXAMPLES>
-In: "explain how memory works in computers"
-Out:
+Examples:
+
+Input: "explain how memory works in computers"
+Output:
+<analysis>
+1. Goal: explain computer memory architecture accessibly.
+2. Gaps: no audience level, depth, or format specified — risks a dry, overly technical response.
+3. Fixes: require analogies, prohibit dense jargon, specify the full hierarchy.
+4. Persona: CS Educator.
+5. Headers: Role, Task, Constraints, Format.
+Self-critique: All 4 headers carry distinct weight. No redundancy. No placeholders needed.
+</analysis>
 # Role
 You are a computer science educator.
 # Task
-Explain how computer memory works, covering the hierarchy from registers and cache to RAM and virtual memory.
+Explain the memory hierarchy: registers, L1/L2 cache, RAM, virtual memory, and long-term storage.
 # Constraints
-Use analogies for accessibility. Avoid unnecessary jargon.
-# Output Format
-Structured explanation with a brief summary.
+Use real-world analogies. Avoid unnecessary jargon.
+# Format
+Structured sections with a brief summary at the end.
 
-In: "help me write a professional email declining a meeting"
-Out:
+Input: "help me write a professional email declining a meeting"
+Output:
+<analysis>
+1. Goal: draft a polite meeting-decline email.
+2. Gaps: no tone guardrails or relationship-preservation strategy — risks a blunt refusal.
+3. Fix: mandate a constructive alternative (async update or reschedule).
+4. No dedicated persona needed.
+5. Headers: Context, Task, Tone.
+Self-critique: Role header dropped — no persona adds value here. No placeholders since the task is generic enough. Tone is non-redundant with Task since it governs delivery, not content.
+</analysis>
 # Context
-User needs to compose a professional email politely declining a meeting invitation.
+Declining a meeting invitation while preserving the professional relationship.
 # Task
-Draft a concise, professional email that declines the meeting while maintaining a positive relationship. Offer an alternative (e.g., async update or rescheduled time).
+Draft a concise email declining the meeting. Include a constructive alternative: an async update or a proposed reschedule.
 # Tone
-Polite, professional, and constructive.
-</EXAMPLES>
+Polite, professional, and constructive.`;
 
-Remember: Output ONLY the optimized prompt. Never answer, execute, or discuss the task itself.`;
+const REASONING_SYSTEM_INSTRUCTION = `You are a Prompt Optimizer. ONLY rewrite prompts. NEVER execute them.
+
+Rules:
+1. Use your <thinking> block to: identify the core objective → gaps (tone, structure, audience) → ideal persona → headers to use.
+2. Before finalizing, self-critique: does every header earn its place? Is any instruction redundant? Are placeholders necessary?
+3. Output ONLY the optimized prompt. No preamble, commentary, or markdown code blocks.
+4. Use ONLY applicable headers: # Role, # Context, # Task, # Constraints, # Format, # Tone.
+5. Sharpen vague language into actionable directives. Preserve explicit user intent. Auto-define known concepts; use [PLACEHOLDER] only for missing user-specific data.
+
+Remember: Output ONLY the optimized prompt. Do not include <analysis> tags as your internal thinking is sufficient.`;
 
 // ─── State ──────────────────────────────────────────────────────────────────────
 
@@ -256,12 +278,10 @@ async function handleOptimization(rawText, tab) {
 		const result = await chrome.storage.local.get([
 			"groqApiKey",
 			"selectedModel",
-			"optHistory",
 			"curatedContext",
 		]);
 		const apiKey = result.groqApiKey;
 		const model = result.selectedModel || CONFIG.DEFAULT_MODEL;
-		let history = result.optHistory || {};
 		const curatedContextMap = result.curatedContext || {};
 
 		if (!apiKey) {
@@ -271,58 +291,32 @@ async function handleOptimization(rawText, tab) {
 			return;
 		}
 
-		// Capture the latest AI response from the page (if on an AI chat site)
-		let capturedResponse = null;
-		try {
-			const resp = await chrome.tabs.sendMessage(tab.id, {
-				action: "captureResponse",
-			});
-			capturedResponse = resp?.response
-				? truncateText(resp.response, 800)
-				: null;
-		} catch {
-			// Silently fail — page may not be an AI chat site or content script not ready
-		}
-
-		// Prune stale entries before reading
-		history = pruneHistory(history);
-		const siteHistory = history[hostname]?.entries || [];
-
 		const siteCuratedContext = curatedContextMap[hostname] || [];
 
 		sendMessageToTab(tab.id, { status: "loading", model: model });
 
-		const optimizedText = await callGroqAPI(
+		let fullText = "";
+		for await (const chunk of callGroqAPIStream(
 			rawText,
 			apiKey,
 			model,
-			siteHistory,
 			siteCuratedContext,
-		);
-
-		// Update history: store optimizer output (a) and site AI response (r) — no raw user input
-		const now = Date.now();
-		const newEntry = {
-			a: truncateText(optimizedText, 400),
-			r: capturedResponse,
-			ts: now,
-		};
-		if (!history[hostname]) {
-			history[hostname] = { entries: [], lastUsed: now };
+		)) {
+			fullText += chunk;
+			sendMessageToTab(tab.id, { action: "streamUpdate", text: fullText });
 		}
-		history[hostname].entries = [...siteHistory, newEntry].slice(
-			-CONFIG.HISTORY.MAX_ENTRIES_PER_SITE,
-		);
-		history[hostname].lastUsed = now;
 
-		// Safe write with quota protection
-		await safeSetHistory(history);
+		let optimizedText = fullText.replace(/<(think|analysis)>[\s\S]*?<\/\1>/gi, "").trim();
+		const codeBlockMatch = optimizedText.match(/```(?:[a-z]*)\n?([\s\S]*?)```/i);
+		if (codeBlockMatch?.[1]) {
+			optimizedText = codeBlockMatch[1].trim();
+		}
 
 		sendMessageToTab(tab.id, {
 			action: "replaceText",
 			text: optimizedText,
 			hostname: hostname,
-			entryCount: history[hostname]?.entries?.length || 0,
+			entryCount: siteCuratedContext.length,
 		});
 	} catch (error) {
 		sendMessageToTab(tab.id, { error: error.message });
@@ -341,20 +335,19 @@ async function handleOptimization(rawText, tab) {
  * @param {Array<{id: string, text: string, ts: number}>} curatedContext - User manually selected snippets
  * @returns {Promise<string>} Optimized prompt text
  */
-async function callGroqAPI(
+async function* callGroqAPIStream(
 	prompt,
 	apiKey,
 	model,
-	history = [],
 	curatedContext = [],
 ) {
-	// Build system instruction with model-specific addendum
-	const systemContent = CORE_SYSTEM_INSTRUCTION + getModelAddendum(model);
+	// Decide which system instruction to use
+	const isReasoningModel = model.toLowerCase().includes("qwen") || model.toLowerCase().includes("r1");
+	const systemContent = isReasoningModel ? REASONING_SYSTEM_INSTRUCTION : CORE_SYSTEM_INSTRUCTION;
 
 	// Build messages array: system → context → current prompt
 	const messages = [{ role: "system", content: systemContent }];
 
-	// Use curated context if available, otherwise fallback to automatic history
 	if (curatedContext.length > 0) {
 		const curatedBlock = curatedContext
 			.map((c, i) => `--- Snippet ${i + 1} ---\n${c.text}`)
@@ -367,26 +360,6 @@ async function callGroqAPI(
 			role: "assistant",
 			content:
 				"Understood. I will strictly use the curated snippets provided as context for the prompt optimization.",
-		});
-	} else if (history.length > 0) {
-		const contextBlock = history
-			.map((turn, i) => {
-				let block = `--- Turn ${i + 1} ---\nOptimized prompt sent: ${turn.a}`;
-				if (turn.r) {
-					block += `\n[Site AI responded]: ${turn.r}`;
-				}
-				return block;
-			})
-			.join("\n\n");
-
-		messages.push({
-			role: "user",
-			content: `[Conversation context from this site — use this to optimize follow-up prompts]:\n${contextBlock}`,
-		});
-		messages.push({
-			role: "assistant",
-			content:
-				"Understood. I have the conversation context and will optimize the next prompt accordingly.",
 		});
 	}
 
@@ -405,6 +378,7 @@ async function callGroqAPI(
 		messages: messages,
 		temperature: 0.1,
 		max_tokens: 2048,
+		stream: true,
 	};
 
 	// Create a new abort controller for this request
@@ -434,25 +408,31 @@ async function callGroqAPI(
 			);
 		}
 
-		const data = await response.json();
-		if (!data.choices?.[0]?.message) {
-			throw new Error("Invalid response structure from API.");
+		const reader = response.body.getReader();
+		const decoder = new TextDecoder("utf-8");
+		let buffer = "";
+
+		while (true) {
+			const { value, done } = await reader.read();
+			if (done) break;
+
+			buffer += decoder.decode(value, { stream: true });
+			let newlineIndex;
+			while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
+				const line = buffer.slice(0, newlineIndex).trim();
+				buffer = buffer.slice(newlineIndex + 1);
+
+				if (line.startsWith("data: ") && line !== "data: [DONE]") {
+					try {
+						const data = JSON.parse(line.slice(6));
+						const delta = data.choices[0]?.delta?.content;
+						if (delta) yield delta;
+					} catch (e) {
+						// Ignore partial parse errors
+					}
+				}
+			}
 		}
-
-		let content = data.choices[0].message.content.trim();
-
-		// ── Pre-processing / Cleaning ─────────────────────────────────
-		// 1. Strip thinking blocks (common in reasoning models)
-		content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-
-		// 2. Extract from markdown code blocks if the model wrapped it
-		// (matches ```[lang] ... ``` and takes the content)
-		const codeBlockMatch = content.match(/```(?:[a-z]*)\n?([\s\S]*?)```/i);
-		if (codeBlockMatch?.[1]) {
-			content = codeBlockMatch[1].trim();
-		}
-
-		return content;
 	} catch (error) {
 		clearTimeout(timeoutId);
 		if (error.name === "AbortError") {
@@ -464,22 +444,6 @@ async function callGroqAPI(
 	} finally {
 		activeController = null;
 	}
-}
-
-// ─── Model-Aware Instruction Routing ────────────────────────────────────────────
-
-/**
- * Returns a model-specific addendum to append to the core system instruction.
- * Reasoning-capable models get explicit chain-of-thought guidance.
- * @param {string} model - Model identifier
- * @returns {string}
- */
-function getModelAddendum(model) {
-	const lower = model.toLowerCase();
-	if (lower.includes("qwen") || lower.includes("r1")) {
-		return "\n\nUse step-by-step reasoning to analyze the input before producing the optimized prompt. Place your reasoning in a <think> block, then output the final optimized prompt outside of it.";
-	}
-	return "";
 }
 
 // ─── Token Budget Management ────────────────────────────────────────────────────
@@ -530,99 +494,6 @@ function trimMessagesToBudget(messages, currentPrompt, budgetTokens) {
 		// Remove oldest user/assistant pair (index 1 and 2, right after system message)
 		messages.splice(1, 2);
 	}
-}
-
-// ─── History Management ─────────────────────────────────────────────────────────
-
-/**
- * Prunes history by removing expired entries (TTL) and evicting
- * least-recently-used hostnames when the global cap is exceeded.
- * @param {Object} history - The raw optHistory object from storage
- * @returns {Object} Pruned history
- */
-function pruneHistory(history) {
-	const now = Date.now();
-	const pruned = {};
-
-	// Pass 1: Remove expired entries and empty hostnames
-	for (const [host, data] of Object.entries(history)) {
-		// Migrate legacy format: array → { entries, lastUsed }
-		const entries = Array.isArray(data) ? data : data.entries || [];
-		const lastUsed = data.lastUsed || now;
-
-		const validEntries = entries.filter(
-			(entry) => entry.ts && now - entry.ts < CONFIG.HISTORY.TTL_MS,
-		);
-
-		if (validEntries.length > 0) {
-			pruned[host] = {
-				entries: validEntries.slice(-CONFIG.HISTORY.MAX_ENTRIES_PER_SITE),
-				lastUsed: lastUsed,
-			};
-		}
-	}
-
-	// Pass 2: Evict LRU hostnames if over the global cap
-	const hostnames = Object.keys(pruned);
-	if (hostnames.length > CONFIG.HISTORY.MAX_HOSTNAMES) {
-		const sorted = hostnames.sort(
-			(a, b) => pruned[a].lastUsed - pruned[b].lastUsed,
-		);
-		const toEvict = sorted.slice(
-			0,
-			hostnames.length - CONFIG.HISTORY.MAX_HOSTNAMES,
-		);
-		for (const host of toEvict) {
-			delete pruned[host];
-		}
-	}
-
-	return pruned;
-}
-
-/**
- * Writes history to storage with quota protection.
- * If the serialized size approaches the storage limit, performs
- * aggressive pruning before writing.
- * @param {Object} history - Pruned history object
- */
-async function safeSetHistory(history) {
-	let pruned = pruneHistory(history);
-	const sizeEstimate = new Blob([JSON.stringify({ optHistory: pruned })]).size;
-
-	if (sizeEstimate > CONFIG.HISTORY.STORAGE_SAFETY_BYTES) {
-		pruned = aggressivePrune(pruned);
-	}
-
-	try {
-		await chrome.storage.local.set({ optHistory: pruned });
-	} catch (storageErr) {
-		console.warn("Storage write failed, clearing all history:", storageErr);
-		await chrome.storage.local.set({ optHistory: {} });
-	}
-}
-
-/**
- * Emergency pruning: keeps only the most recent entry per site
- * and retains only the 10 most recently used hostnames.
- * @param {Object} history
- * @returns {Object} Aggressively pruned history
- */
-function aggressivePrune(history) {
-	const sorted = Object.entries(history).sort(
-		(a, b) => b[1].lastUsed - a[1].lastUsed,
-	);
-	const kept = sorted.slice(0, 10);
-	const result = {};
-
-	for (const [host, data] of kept) {
-		result[host] = {
-			entries: data.entries.slice(-1), // Keep only the most recent entry
-			lastUsed: data.lastUsed,
-		};
-	}
-
-	return result;
 }
 
 // ─── Tab Communication ──────────────────────────────────────────────────────────

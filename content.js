@@ -26,6 +26,7 @@ function renderAlertDOM() {
       <span id="groq-alert-title">Prompt Optimizer</span>
     </div>
     <div class="groq-alert-body" id="groq-alert-message"></div>
+    <div class="groq-stream-content groq-hidden" id="groq-stream-content"></div>
     <div class="groq-progress-container" id="groq-progress-container">
       <div class="groq-progress-bar" id="groq-progress-bar"></div>
     </div>
@@ -96,6 +97,11 @@ function updateAlert(opts) {
 function hideLoading() {
 	const modal = document.getElementById("groq-alert-modal");
 	const overlay = document.getElementById("groq-alert-overlay");
+	const streamBox = document.getElementById("groq-stream-content");
+	if (streamBox) {
+		streamBox.textContent = "";
+		streamBox.classList.add("groq-hidden");
+	}
 	if (modal) {
 		modal.classList.remove("groq-show");
 		setTimeout(() => modal.remove(), 400);
@@ -180,11 +186,20 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 		);
 	}
 
+	if (request.action === "streamUpdate") {
+		const streamBox = document.getElementById("groq-stream-content");
+		if (streamBox) {
+			streamBox.classList.remove("groq-hidden");
+			streamBox.textContent = request.text;
+			streamBox.scrollTop = streamBox.scrollHeight;
+		}
+	}
+
 	if (request.action === "replaceText") {
 		hideLoading();
 		const activeElement = document.activeElement;
 		const memoryInfo = request.entryCount
-			? ` (+${request.entryCount} context)`
+			? ` (+${request.entryCount} curated context)`
 			: "";
 
 		let replaced = false;

@@ -32,8 +32,8 @@
 		},
 		"add-to-context": {
 			"suggested_key": {
-				"default": "Alt+Shift+C",
-				"mac": "Command+Shift+C"
+				"default": "Ctrl+Shift+X",
+				"mac": "Ctrl+Shift+X"
 			},
 			"description": "Add the currently selected text to the Optimizer Context"
 		}
