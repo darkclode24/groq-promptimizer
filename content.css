@@ -211,5 +211,6 @@
 }
 
 .groq-hidden {
+	/* biome-ignore lint/complexity/noImportantStyles: override site styles */
 	display: none !important;
 }

@@ -162,8 +162,8 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 	if (request.action === "captureResponse") {
 		const hostname = window.location.hostname;
 		const response =
-			typeof extractLastResponse === "function"
-				? extractLastResponse(hostname)
+			typeof _extractLastResponse === "function"
+				? _extractLastResponse(hostname)
 				: null;
 		sendResponse({ response: response });
 		return;

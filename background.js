@@ -178,7 +178,7 @@ async function addToCuratedContext(text, tab) {
 }
 
 // Handle messages from the popup (e.g. Optimize Current Selection)
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 	if (request.action === "optimizeCurrentSelection") {
 		(async () => {
 			try {
@@ -207,7 +207,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 				handleOptimization(selectedText, tab);
 				sendResponse({ success: true });
-			} catch (err) {
+			} catch (_err) {
 				sendResponse({ error: "Could not capture selection." });
 			}
 		})();
@@ -306,8 +306,12 @@ async function handleOptimization(rawText, tab) {
 			sendMessageToTab(tab.id, { action: "streamUpdate", text: fullText });
 		}
 
-		let optimizedText = fullText.replace(/<(think|analysis)>[\s\S]*?<\/\1>/gi, "").trim();
-		const codeBlockMatch = optimizedText.match(/```(?:[a-z]*)\n?([\s\S]*?)```/i);
+		let optimizedText = fullText
+			.replace(/<(think|analysis)>[\s\S]*?<\/\1>/gi, "")
+			.trim();
+		const codeBlockMatch = optimizedText.match(
+			/```(?:[a-z]*)\n?([\s\S]*?)```/i,
+		);
 		if (codeBlockMatch?.[1]) {
 			optimizedText = codeBlockMatch[1].trim();
 		}
@@ -335,15 +339,13 @@ async function handleOptimization(rawText, tab) {
  * @param {Array<{id: string, text: string, ts: number}>} curatedContext - User manually selected snippets
  * @returns {Promise<string>} Optimized prompt text
  */
-async function* callGroqAPIStream(
-	prompt,
-	apiKey,
-	model,
-	curatedContext = [],
-) {
+async function* callGroqAPIStream(prompt, apiKey, model, curatedContext = []) {
 	// Decide which system instruction to use
-	const isReasoningModel = model.toLowerCase().includes("qwen") || model.toLowerCase().includes("r1");
-	const systemContent = isReasoningModel ? REASONING_SYSTEM_INSTRUCTION : CORE_SYSTEM_INSTRUCTION;
+	const isReasoningModel =
+		model.toLowerCase().includes("qwen") || model.toLowerCase().includes("r1");
+	const systemContent = isReasoningModel
+		? REASONING_SYSTEM_INSTRUCTION
+		: CORE_SYSTEM_INSTRUCTION;
 
 	// Build messages array: system → context → current prompt
 	const messages = [{ role: "system", content: systemContent }];
@@ -417,8 +419,8 @@ async function* callGroqAPIStream(
 			if (done) break;
 
 			buffer += decoder.decode(value, { stream: true });
-			let newlineIndex;
-			while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
+			let newlineIndex = buffer.indexOf("\n");
+			while (newlineIndex >= 0) {
 				const line = buffer.slice(0, newlineIndex).trim();
 				buffer = buffer.slice(newlineIndex + 1);
 
@@ -427,10 +429,11 @@ async function* callGroqAPIStream(
 						const data = JSON.parse(line.slice(6));
 						const delta = data.choices[0]?.delta?.content;
 						if (delta) yield delta;
-					} catch (e) {
+					} catch (_e) {
 						// Ignore partial parse errors
 					}
 				}
+				newlineIndex = buffer.indexOf("\n");
 			}
 		}
 	} catch (error) {
@@ -463,7 +466,7 @@ function estimateTokens(text) {
  * @param {number} maxLen - Maximum characters
  * @returns {string}
  */
-function truncateText(text, maxLen) {
+function _truncateText(text, maxLen) {
 	if (!text || text.length <= maxLen) return text;
 	// Cut at the last space before maxLen to avoid mid-word truncation
 	const truncated = text.slice(0, maxLen);

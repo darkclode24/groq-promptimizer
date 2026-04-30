@@ -90,7 +90,7 @@ const GENERIC_SELECTORS = [
  * @param {string} hostname - The current page's hostname
  * @returns {string|null} The extracted response text, or null if not found
  */
-function extractLastResponse(hostname) {
+function _extractLastResponse(hostname) {
 	// Tier 1: Known site-specific selectors
 	const siteSelectors = SITE_EXTRACTORS[hostname];
 	if (siteSelectors) {
